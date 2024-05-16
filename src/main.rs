@@ -1,5 +1,4 @@
 use anyhow::Result;
-use hwlocality::cpu::cpuset::CpuSet;
 use hwlocality::object::types::ObjectType;
 use hwlocality::{topology::builder::BuildFlags, Topology};
 use serde::Serialize;
@@ -7,6 +6,7 @@ use serde::Serialize;
 #[derive(Serialize)]
 struct JobDesc {
     host: String,
+    rank: i32,
     numa: Vec<usize>,
     pu: Vec<usize>,
 }
@@ -31,9 +31,23 @@ fn main() -> Result<()> {
         .into_string()
         .unwrap_or("unknown".to_string());
 
+    let rank: i32 = match std::env::var("PMI_RANK") {
+        Ok(val) => val.parse().unwrap(),
+        Err(_) => match std::env::var("PMIX_RANK") {
+            Ok(val) => val.parse().unwrap(),
+            Err(_) => -1,
+        },
+    };
+
     println!(
         "{}",
-        serde_json::to_string(&JobDesc { host, numa, pu }).unwrap()
+        serde_json::to_string(&JobDesc {
+            host,
+            rank,
+            numa,
+            pu
+        })
+        .unwrap()
     );
 
     Ok(())
