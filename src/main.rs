@@ -1,4 +1,5 @@
 use std::ops::Deref;
+use std::path::PathBuf;
 
 use anyhow::anyhow;
 use anyhow::Result;
@@ -7,10 +8,12 @@ use hwlocality::bitmap::BitmapRef;
 use hwlocality::cpu::cpuset::CpuSet;
 use hwlocality::object::types::ObjectType;
 use hwlocality::{topology::builder::BuildFlags, Topology};
+use joblist::Job;
 use which::which;
 
 mod joblist;
 mod map;
+use joblist::JobList;
 use map::JobDesc;
 use map::ProcMap;
 
@@ -80,6 +83,7 @@ struct Args {
     #[clap(long, short, action)]
     /// Output mapping information for current process
     display: bool,
+    job: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -108,6 +112,15 @@ fn main() -> Result<()> {
         pmap.display();
         return Ok(());
     }
+
+    if args.job.is_none() {
+        println!("Pass a job.yml file to run a job");
+        return Ok(());
+    }
+
+    let jobs = JobList::load(args.job.unwrap())?;
+
+    println!("{:?}", jobs);
 
     Ok(())
 }

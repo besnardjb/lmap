@@ -73,14 +73,14 @@ impl CountChild for Numa {
 }
 
 impl Numa {
-    fn count_by_rank(&self) -> Vec<(i32, i32)> {
-        let mut by_rank: Vec<(i32, i32)> = Vec::new();
+    fn count_by_rank(&self) -> Vec<((i32, i32), i32)> {
+        let mut by_rank: Vec<((i32, i32), i32)> = Vec::new();
 
         /* Gather Slots by RANK */
         for slot in self.slots.iter() {
             let mut seen = false;
 
-            for (rank, val) in by_rank.iter_mut() {
+            for ((rank, _), val) in by_rank.iter_mut() {
                 if slot.rank == *rank {
                     *val += 1;
                     seen = true;
@@ -89,21 +89,11 @@ impl Numa {
             }
 
             if !seen {
-                by_rank.push((slot.rank, 1));
+                by_rank.push(((slot.rank, slot.job), 1));
             }
         }
 
         by_rank
-    }
-
-    fn rank_job_id(&self, rank: i32) -> Option<i32> {
-        for slot in self.slots.iter() {
-            if slot.rank == rank {
-                return Some(slot.job);
-            }
-        }
-
-        return None;
     }
 }
 
@@ -307,7 +297,7 @@ impl ProcMap {
             for (_, numa) in node.numas.iter() {
                 ProcMap::print_block(
                     vec![format!("NUMA {}", numa.id), format!("{}", numa.id)],
-                    node.count() as usize,
+                    numa.count() as usize,
                     &mut col,
                 );
             }
@@ -320,28 +310,24 @@ impl ProcMap {
             for (_, numa) in node.numas.iter() {
                 /* Print the slots */
                 let by_rank = numa.count_by_rank();
-                for (rank, count) in by_rank {
-                    let job = numa.rank_job_id(rank);
-
-                    if let Some(job) = job {
-                        if job >= 0 {
-                            ProcMap::print_block_color(
-                                vec![
-                                    format!("Rank {} Job {}", rank, job),
-                                    format!("R:{} J: {}", rank, job),
-                                    format!("{}/{}", rank, job),
-                                    format!("{}", job),
-                                ],
-                                count as usize,
-                                col.id(job as u32),
-                            );
-                        } else {
-                            ProcMap::print_block_color(
-                                vec![format!("Rank {}", rank), format!("{}", rank)],
-                                count as usize,
-                                (155, 155, 155),
-                            );
-                        }
+                for ((rank, job), count) in by_rank {
+                    if job >= 0 {
+                        ProcMap::print_block_color(
+                            vec![
+                                format!("Rank {} Job {}", rank, job),
+                                format!("R:{} J: {}", rank, job),
+                                format!("{}/{}", rank, job),
+                                format!("{}", job),
+                            ],
+                            count as usize,
+                            col.id(job as u32),
+                        );
+                    } else {
+                        ProcMap::print_block_color(
+                            vec![format!("Rank {}", rank), format!("{}", rank)],
+                            count as usize,
+                            (155, 155, 155),
+                        );
                     }
                 }
             }
