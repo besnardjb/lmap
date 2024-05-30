@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::process::Stdio;
 use std::{collections::HashMap, env, io::Read};
+use yansi::Paint;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct JobDesc {
@@ -12,10 +13,16 @@ pub(crate) struct JobDesc {
     pub(crate) numa: Vec<usize>,
     pub(crate) pu: Vec<Vec<usize>>,
 }
+
+pub trait CountChild {
+    fn count(&self) -> i32;
+}
+
 #[derive(Debug)]
 struct Slot {
     rank: i32,
     pu: Vec<usize>,
+    job: i32,
 }
 
 impl std::fmt::Display for Slot {
@@ -23,6 +30,12 @@ impl std::fmt::Display for Slot {
         let prettypu = self.range();
         write!(f, "Slot {{ rank: {}, pu:{} }}", self.rank, prettypu)?;
         Ok(())
+    }
+}
+
+impl CountChild for Slot {
+    fn count(&self) -> i32 {
+        1
     }
 }
 
@@ -52,15 +65,136 @@ struct Numa {
     id: usize,
     slots: Vec<Slot>,
 }
+
+impl CountChild for Numa {
+    fn count(&self) -> i32 {
+        self.slots.iter().map(|v| v.count()).sum()
+    }
+}
+
+impl Numa {
+    fn count_by_rank(&self) -> Vec<(i32, i32)> {
+        let mut by_rank: Vec<(i32, i32)> = Vec::new();
+
+        /* Gather Slots by RANK */
+        for slot in self.slots.iter() {
+            let mut seen = false;
+
+            for (rank, val) in by_rank.iter_mut() {
+                if slot.rank == *rank {
+                    *val += 1;
+                    seen = true;
+                    break;
+                }
+            }
+
+            if !seen {
+                by_rank.push((slot.rank, 1));
+            }
+        }
+
+        by_rank
+    }
+
+    fn rank_job_id(&self, rank: i32) -> Option<i32> {
+        for slot in self.slots.iter() {
+            if slot.rank == rank {
+                return Some(slot.job);
+            }
+        }
+
+        return None;
+    }
+}
+
 #[derive(Debug)]
 struct Node {
     host: String,
     numas: HashMap<usize, Numa>,
 }
 
+impl CountChild for Node {
+    fn count(&self) -> i32 {
+        self.numas.iter().map(|v| v.1.count()).sum()
+    }
+}
+
+struct RandomColor {
+    cols: Vec<(u8, u8, u8)>,
+    cur: usize,
+}
+
+impl RandomColor {
+    fn init() -> RandomColor {
+        RandomColor {
+            cur: 0,
+            cols: vec![
+                (153, 204, 255),
+                (112, 169, 223),
+                (244, 224, 184),
+                (178, 134, 202),
+                (220, 208, 152),
+                (136, 118, 196),
+                (242, 216, 168),
+                (162, 138, 204),
+                (226, 210, 156),
+                (144, 124, 180),
+                (198, 67, 109),
+                (45, 155, 235),
+                (231, 156, 34),
+                (118, 82, 174),
+                (237, 125, 52),
+                (102, 221, 135),
+                (144, 51, 199),
+                (255, 0, 153),
+                (93, 188, 223),
+                (247, 166, 39),
+                (56, 114, 234),
+                (165, 77, 34),
+                (229, 173, 108),
+                (139, 64, 217),
+                (252, 227, 36),
+                (81, 140, 216),
+                (221, 144, 76),
+                (146, 242, 134),
+                (253, 215, 154),
+                (69, 184, 231),
+                (238, 136, 96),
+                (183, 122, 223),
+                (236, 204, 114),
+                (115, 165, 243),
+                (250, 187, 123),
+                (93, 230, 155),
+                (240, 174, 144),
+            ],
+        }
+    }
+
+    fn next(&mut self) -> (u8, u8, u8) {
+        match self.cols.get(self.cur) {
+            Some(c) => {
+                self.cur += 1;
+                *c
+            }
+            None => (0, 0, 0),
+        }
+    }
+
+    fn id(&self, i: u32) -> (u8, u8, u8) {
+        let u: usize = self.cols.len() % i as usize;
+        self.cols[u]
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct ProcMap {
     nodes: HashMap<String, Node>,
+}
+
+impl CountChild for ProcMap {
+    fn count(&self) -> i32 {
+        self.nodes.iter().map(|v| v.1.count()).sum()
+    }
 }
 
 impl std::fmt::Display for ProcMap {
@@ -106,11 +240,114 @@ impl ProcMap {
                 numa.slots.push(Slot {
                     rank: job.rank,
                     pu: slots.clone(),
+                    job: -1,
                 });
             }
         }
 
         Ok(ret)
+    }
+
+    fn print_block_color(names: Vec<String>, len: usize, col: (u8, u8, u8)) {
+        if len == 0 {
+            return;
+        }
+        let mut text: Option<String> = None;
+
+        for s in names {
+            if s.len() < len {
+                text = Some(s);
+                break;
+            }
+        }
+
+        let mut left = len;
+
+        if let Some(s) = text {
+            print!("{}", s.black().on_rgb(col.0, col.1, col.2));
+            left -= s.len();
+        }
+
+        for _ in 0..left {
+            print!("{}", " ".on_rgb(col.0, col.1, col.2));
+        }
+    }
+
+    fn print_block(names: Vec<String>, len: usize, col: &mut RandomColor) {
+        ProcMap::print_block_color(names, len, col.next());
+    }
+
+    pub(crate) fn display(&self) {
+        let mut col = RandomColor::init();
+
+        ProcMap::print_block(
+            vec!["Whole System".to_string(), "System".to_string()],
+            self.count() as usize,
+            &mut col,
+        );
+
+        println!();
+
+        for (cnt, (host, node)) in self.nodes.iter().enumerate() {
+            ProcMap::print_block(
+                vec![
+                    format!("Node {} : {}", cnt, host),
+                    host.clone(),
+                    format!("{}", cnt),
+                ],
+                node.count() as usize,
+                &mut col,
+            );
+        }
+
+        println!();
+
+        /* NUMA */
+        for (_, node) in self.nodes.iter() {
+            for (_, numa) in node.numas.iter() {
+                ProcMap::print_block(
+                    vec![format!("NUMA {}", numa.id), format!("{}", numa.id)],
+                    node.count() as usize,
+                    &mut col,
+                );
+            }
+        }
+
+        println!();
+
+        /* SLOT */
+        for (_, node) in self.nodes.iter() {
+            for (_, numa) in node.numas.iter() {
+                /* Print the slots */
+                let by_rank = numa.count_by_rank();
+                for (rank, count) in by_rank {
+                    let job = numa.rank_job_id(rank);
+
+                    if let Some(job) = job {
+                        if job >= 0 {
+                            ProcMap::print_block_color(
+                                vec![
+                                    format!("Rank {} Job {}", rank, job),
+                                    format!("R:{} J: {}", rank, job),
+                                    format!("{}/{}", rank, job),
+                                    format!("{}", job),
+                                ],
+                                count as usize,
+                                col.id(job as u32),
+                            );
+                        } else {
+                            ProcMap::print_block_color(
+                                vec![format!("Rank {}", rank), format!("{}", rank)],
+                                count as usize,
+                                (155, 155, 155),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        println!();
     }
 
     fn discovery() -> Result<Vec<JobDesc>> {

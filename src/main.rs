@@ -9,6 +9,7 @@ use hwlocality::object::types::ObjectType;
 use hwlocality::{topology::builder::BuildFlags, Topology};
 use which::which;
 
+mod joblist;
 mod map;
 use map::JobDesc;
 use map::ProcMap;
@@ -42,9 +43,12 @@ fn output_map() -> Result<()> {
         })
         .collect::<Vec<_>>();
 
-    let host = hostname::get()?
-        .into_string()
-        .unwrap_or("unknown".to_string());
+    let host = match std::env::var("HOST") {
+        Ok(val) => val.parse().unwrap(),
+        Err(_) => hostname::get()?
+            .into_string()
+            .unwrap_or("unknown".to_string()),
+    };
 
     let rank: i32 = match std::env::var("PMI_RANK") {
         Ok(val) => val.parse().unwrap(),
@@ -101,6 +105,7 @@ fn main() -> Result<()> {
 
     if args.display {
         println!("{}", pmap);
+        pmap.display();
         return Ok(());
     }
 
