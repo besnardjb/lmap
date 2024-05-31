@@ -8,7 +8,6 @@ use hwlocality::bitmap::BitmapRef;
 use hwlocality::cpu::cpuset::CpuSet;
 use hwlocality::object::types::ObjectType;
 use hwlocality::{topology::builder::BuildFlags, Topology};
-use joblist::Job;
 use which::which;
 
 mod joblist;
@@ -65,7 +64,7 @@ fn output_map() -> Result<()> {
         "{}",
         serde_json::to_string(&JobDesc {
             host,
-            rank,
+            rank: rank as u32,
             numa,
             pu
         })
@@ -105,22 +104,30 @@ fn main() -> Result<()> {
         return Err(anyhow!(e));
     }
 
-    let pmap = ProcMap::init()?;
+    let mut pmap = ProcMap::init()?;
+
+    if args.job.is_none() {
+        if args.display {
+            println!("{}", pmap);
+            pmap.display();
+            return Ok(());
+        }
+
+        println!("Pass a job.yml file to run a job");
+        return Ok(());
+    }
+
+    let mut jobs = JobList::load(args.job.unwrap())?;
+
+    println!("{:?}", jobs);
+
+    pmap.map(&mut jobs)?;
 
     if args.display {
         println!("{}", pmap);
         pmap.display();
         return Ok(());
     }
-
-    if args.job.is_none() {
-        println!("Pass a job.yml file to run a job");
-        return Ok(());
-    }
-
-    let jobs = JobList::load(args.job.unwrap())?;
-
-    println!("{:?}", jobs);
 
     Ok(())
 }
