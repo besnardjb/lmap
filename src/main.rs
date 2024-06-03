@@ -1,5 +1,6 @@
 use std::ops::Deref;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use anyhow::anyhow;
 use anyhow::Result;
@@ -8,6 +9,7 @@ use hwlocality::bitmap::BitmapRef;
 use hwlocality::cpu::cpuset::CpuSet;
 use hwlocality::object::types::ObjectType;
 use hwlocality::{topology::builder::BuildFlags, Topology};
+use std::process::{Command, Stdio};
 use which::which;
 
 mod joblist;
@@ -126,8 +128,16 @@ fn main() -> Result<()> {
     if args.display {
         println!("{}", pmap);
         pmap.display();
-        return Ok(());
     }
+
+    pmap.to_slurm(PathBuf::from_str("./jobfile.slurm")?, &jobs)?;
+
+    // Create a new command with "ls" as the executable
+    let mut cmd = Command::new("srun")
+        .arg("--multi-prog")
+        .arg("./jobfile.slurm")
+        .spawn()?;
+    cmd.wait()?;
 
     Ok(())
 }

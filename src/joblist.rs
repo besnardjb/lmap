@@ -99,6 +99,20 @@ impl JobList {
         Ok(JobList { jobs })
     }
 
+    pub(crate) fn job_id(&self, job: &JobEntry) -> Result<u32> {
+        for (id, j) in self.jobs.iter().enumerate() {
+            if std::ptr::eq(j, job) {
+                return Ok(id as u32);
+            }
+        }
+
+        Err(anyhow!("No such job in list"))
+    }
+
+    pub(crate) fn job_by_id(&self, id: u32) -> Option<&JobEntry> {
+        self.jobs.get(id as usize)
+    }
+
     pub(crate) fn fixed_jobs(&self) -> impl Iterator<Item = &JobEntry> {
         self.jobs
             .iter()

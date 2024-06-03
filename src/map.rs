@@ -2,6 +2,8 @@ use anyhow::anyhow;
 use anyhow::Result;
 use serde::Deserialize;
 use serde::Serialize;
+use std::io::Write;
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::{collections::HashMap, env, io::Read};
 use yansi::Paint;
@@ -288,6 +290,42 @@ impl ProcMap {
         Ok(ret)
     }
 
+    pub(crate) fn to_slurm(&mut self, out: PathBuf, jobs: &JobList) -> Result<()> {
+        let mut per_job: HashMap<u32, Vec<i32>> = HashMap::new();
+
+        for slot in self.each_slot() {
+            if let Some(j) = slot.job {
+                let vec = per_job.entry(j).or_insert(Vec::new());
+                vec.push(slot.rank);
+            }
+        }
+
+        /* At this point for each job we have a rank list */
+        let file = std::fs::File::create(out)?;
+        let mut out = std::io::BufWriter::new(file);
+
+        for (k, v) in per_job.iter() {
+            let j = if let Some(j) = jobs.job_by_id(*k) {
+                j
+            } else {
+                return Err(anyhow!("No such job {}", k));
+            };
+
+            let line = format!(
+                "{} {}\n",
+                v.iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+                j.command.join(" ")
+            );
+
+            out.write_all(line.as_bytes())?;
+        }
+
+        Ok(())
+    }
+
     fn each_node(&mut self) -> impl Iterator<Item = &mut Node> {
         self.nodes.iter_mut().map(|(_, node)| node)
     }
@@ -407,25 +445,23 @@ impl ProcMap {
     }
 
     pub(crate) fn map(&mut self, jobs: &mut JobList) -> Result<()> {
-        let mut jobid: u32 = 1;
-
         /* We start by mapping "for each" jobs */
         for j in jobs.each_jobs() {
             if let Some(loc) = j.loc.as_ref() {
                 match loc.as_str() {
                     "numa" => {
                         for nu in self.each_numa() {
-                            nu.acquire(jobid)?;
+                            nu.acquire(jobs.job_id(j)?)?;
                         }
                     }
                     "node" => {
                         for n in self.each_node() {
-                            n.acquire(jobid)?;
+                            n.acquire(jobs.job_id(j)?)?;
                         }
                     }
                     "slot" => {
                         for s in self.each_slot() {
-                            s.acquire(jobid)?;
+                            s.acquire(jobs.job_id(j)?)?;
                         }
                     }
                     _ => {
@@ -435,13 +471,11 @@ impl ProcMap {
             } else {
                 unreachable!("All Each specifier has to provide a locality");
             }
-
-            jobid += 1;
         }
 
         /* Now we map fixed JOBs */
         for j in jobs.fixed_jobs() {
-            let mut number_to_alloc = match j.order.parse::<usize>() {
+            let number_to_alloc = match j.order.parse::<usize>() {
                 Ok(num) => num,
                 Err(e) => {
                     return Err(anyhow!(
@@ -453,8 +487,7 @@ impl ProcMap {
             };
 
             /* Now we want to acquire as many as per fixed using the correct walk logic */
-            self.map_for_defined_size(&j.loc_or_slot(), number_to_alloc, jobid, true)?;
-            jobid += 1;
+            self.map_for_defined_size(&j.loc_or_slot(), number_to_alloc, jobs.job_id(j)?, true)?;
         }
 
         /* Eventually we map the "all" jobs */
@@ -467,16 +500,14 @@ impl ProcMap {
 
         for j in jobs.all_jobs() {
             /* We give the rest to the first job */
-            let mut tsize = if is_first {
+            let tsize = if is_first {
                 is_first = false;
                 quantum + rest
             } else {
                 quantum
             };
 
-            self.map_for_defined_size(&j.loc_or_slot(), tsize, jobid, false)?;
-
-            jobid += 1;
+            self.map_for_defined_size(&j.loc_or_slot(), tsize, jobs.job_id(j)?, false)?;
         }
 
         Ok(())
