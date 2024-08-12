@@ -7,6 +7,9 @@ lmap is an open-source tool designed to launch colocated jobs (Multi-Program Mul
 lmap [OPTIONS] [JOB]
 ```
 
+- Allocate cores using `salloc`
+- Run your program with `lmap`
+
 ### Arguments:
 - `[JOB]`: The jobfile specifying the resources to allocate and commands to execute.
 
